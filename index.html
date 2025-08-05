@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Controle de Estoque - Tinta em Pó</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 16px 24px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            z-index: 9999;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+        }
+        .toast.show {
+            transform: translateX(0);
+        }
+        .toast.success {
+            background-color: #10b981;
+        }
+        .toast.error {
+            background-color: #ef4444;
+        }
+        .toast.info {
+            background-color: #3b82f6;
+        }
+        .loading {
+            border: 2px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 2px solid #3498db;
+            width: 16px;
+            height: 16px;
+            animation: spin 2s linear infinite;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            z-index: 9998;
+            transition: all 0.3s ease;
+        }
+        .connection-status.connected {
+            background-color: #10b981;
+            color: white;
+        }
+        .connection-status.disconnected {
+            background-color: #ef4444;
+            color: white;
+        }
+        .kpi-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s ease;
+        }
+        .kpi-card:hover {
+            transform: translateY(-2px);
+        }
+        .kpi-estoque {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+        .kpi-produtos {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        }
+        .table-row:hover {
+            background-color: #f8fafc;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            transition: all 0.2s ease;
+        }
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Connection Status -->
+    <div id="connectionStatus" class="connection-status connected">
+        <i class="fas fa-wifi mr-2"></i>Conectado
+    </div>
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center py-6">
+                <div class="flex items-center">
+                    <i class="fas fa-palette text-blue-600 text-3xl mr-3"></i>
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-900">Sistema de Controle de Estoque</h1>
+                        <p class="text-gray-600">Tinta em Pó - Sincronização Automática</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div class="text-right">
+                        <div class="text-sm text-gray-500">Status</div>
+                        <div id="onlineUsers" class="text-lg font-semibold text-green-600">
+                            <i class="fas fa-users mr-1"></i>Online
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="bg-white border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex space-x-8">
+                <button onclick="showTab('produtos')" id="tab-produtos" class="tab-button py-4 px-1 border-b-2 border-blue-500 font-medium text-sm text-blue-600">
+                    <i class="fas fa-box mr-2"></i>Cadastro de Produtos
+                </button>
+                <button onclick="showTab('movimentacoes')" id="tab-movimentacoes" class="tab-button py-4 px-1 border-b-2 border-transparent font-medium text-sm text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                    <i class="fas fa-exchange-alt mr-2"></i>Movimentações
+                </button>
+                <button onclick="showTab('relatorios')" id="tab-relatorios" class="tab-button py-4 px-1 border-b-2 border-transparent font-medium text-sm text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                    <i class="fas fa-chart-bar mr-2"></i>Relatórios
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        
+        <!-- Aba Produtos -->
+        <div id="content-produtos" class="tab-content">
+            <div class="bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-medium text-gray-900">Cadastro de Produtos</h2>
+                    <p class="text-sm text-gray-600">Gerencie os produtos do estoque</p>
+                </div>
+                <div class="p-6">
+                    <!-- Formulário -->
+                    <form id="formProduto" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Código da Tinta</label>
+                            <input type="text" id="codigoProduto" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: T001" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Nome do Produto</label>
+                            <input type="text" id="nomeProduto" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: Tinta Vermelha" required>
+                        </div>
+                        <div class="flex items-end">
+                            <button type="submit" class="btn-primary w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <i class="fas fa-plus mr-2"></i>Cadastrar
+                            </button>
+                        </div>
+                    </form>
+
+                    <!-- Lista de Produtos -->
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Código</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nome</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data Criação</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="listaProdutos" class="bg-white divide-y divide-gray-200">
+                                <!-- Produtos serão carregados aqui -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Aba Movimentações -->
+        <div id="content-movimentacoes" class="tab-content hidden">
+            <div class="bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-medium text-gray-900">Movimentações de Estoque</h2>
+                    <p class="text-sm text-gray-600">Registre entradas e saídas de produtos</p>
+                </div>
+                <div class="p-6">
+                    <!-- Formulário de Movimentação -->
+                    <form id="formMovimentacao" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Produto</label>
+                            <select id="produtoMovimentacao" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                                <option value="">Selecione um produto</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Quantidade (kg)</label>
+                            <input type="number" id="quantidadeMovimentacao" step="0.01" min="0.01" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0,00" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Tipo</label>
+                            <div class="flex space-x-4 pt-2">
+                                <label class="flex items-center">
+                                    <input type="radio" name="tipoMovimentacao" value="entrada" class="mr-2" required>
+                                    <span class="text-green-600"><i class="fas fa-arrow-up mr-1"></i>Entrada</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="tipoMovimentacao" value="saida" class="mr-2" required>
+                                    <span class="text-red-600"><i class="fas fa-arrow-down mr-1"></i>Saída</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Responsável</label>
+                            <input type="text" id="responsavelMovimentacao" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Nome do responsável" required>
+                        </div>
+                        <div class="flex items-end">
+                            <button type="submit" class="btn-primary w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <i class="fas fa-save mr-2"></i>Salvar
+                            </button>
+                        </div>
+                    </form>
+
+                    <!-- Histórico de Movimentações -->
+                    <div class="mt-8">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Histórico de Movimentações</h3>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data/Hora</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Produto</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantidade</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Responsável</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Saldo</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="listaMovimentacoes" class="bg-white divide-y divide-gray-200">
+                                    <!-- Movimentações serão carregadas aqui -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Aba Relatórios -->
+        <div id="content-relatorios" class="tab-content hidden">
+            <!-- KPIs -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div class="kpi-card kpi-estoque">
+                    <div class="flex items-center justify-center mb-3">
+                        <i class="fas fa-weight text-4xl"></i>
+                    </div>
+                    <div class="text-3xl font-bold mb-2" id="kpiEstoqueTotal">0,00 kg</div>
+                    <div class="text-sm opacity-90">Estoque Total</div>
+                </div>
+                <div class="kpi-card kpi-produtos">
+                    <div class="flex items-center justify-center mb-3">
+                        <i class="fas fa-boxes text-4xl"></i>
+                    </div>
+                    <div class="text-3xl font-bold mb-2" id="kpiProdutosCadastrados">0</div>
+                    <div class="text-sm opacity-90">Produtos Cadastrados</div>
+                </div>
+            </div>
+
+            <!-- Relatórios -->
+            <div class="bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-medium text-gray-900">Relatórios e Exportações</h2>
+                    <p class="text-sm text-gray-600">Consulte movimentações e exporte dados</p>
+                </div>
+                <div class="p-6">
+                    <!-- Filtros e Exportações -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Data Início</label>
+                            <input type="date" id="dataInicio" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Data Fim</label>
+                            <input type="date" id="dataFim" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div class="flex items-end">
+                            <button onclick="filtrarRelatorio()" class="w-full bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500">
+                                <i class="fas fa-filter mr-2"></i>Filtrar
+                            </button>
+                        </div>
+                        <div class="flex items-end">
+                            <button onclick="limparFiltros()" class="w-full bg-gray-400 text-white px-4 py-2 rounded-md hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                                <i class="fas fa-times mr-2"></i>Limpar
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Botões de Exportação -->
+                    <div class="flex flex-wrap gap-4 mb-6">
+                        <button onclick="exportarMovimentacoesExcel()" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500">
+                            <i class="fas fa-file-excel mr-2"></i>Exportar Movimentações (Excel)
+                        </button>
+                        <button onclick="exportarEstoqueExcel()" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <i class="fas fa-file-excel mr-2"></i>Exportar Estoque Atual (Excel)
+                        </button>
+                        <button onclick="baixarBackupJSON()" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500">
+                            <i class="fas fa-download mr-2"></i>Backup JSON
+                        </button>
+                        <label class="bg-orange-600 text-white px-4 py-2 rounded-md hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer">
+                            <i class="fas fa-upload mr-2"></i>Restaurar JSON
+                            <input type="file" id="inputRestaurar" accept=".json" class="hidden" onchange="restaurarBackupJSON(event)">
+                        </label>
+                    </div>
+
+                    <!-- Tabela de Estoque Atual -->
+                    <div class="mb-8">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Estoque Atual</h3>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Código</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Produto</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantidade (kg)</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabelaEstoqueAtual" class="bg-white divide-y divide-gray-200">
+                                    <!-- Estoque será carregado aqui -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Tabela de Movimentações Filtradas -->
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Movimentações por Período</h3>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data/Hora</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Produto</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantidade</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Responsável</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabelaMovimentacoesFiltradas" class="bg-white divide-y divide-gray-200">
+                                    <!-- Movimentações filtradas serão carregadas aqui -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Configuração Firebase (público para demonstração)
+        const firebaseConfig = {
+            apiKey: "AIzaSyDrJ5F4B4R6h1KrPZxKdZG2OgQzqz3kQ8k",
+            authDomain: "estoque-tinta-demo.firebaseapp.com",
+            databaseURL: "https://estoque-tinta-demo-default-rtdb.firebaseio.com",
+            projectId: "estoque-tinta-demo",
+            storageBucket: "estoque-tinta-demo.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdefghijklmnop"
+        };
+
+        // Inicializar Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        // Variáveis globais
+        let produtos = {};
+        let movimentacoes = {};
+        let currentTab = 'produtos';
+
+        // Funções de Interface
+        function showTab(tabName) {
+            // Esconder todas as abas
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.add('hidden');
+            });
+            
+            // Resetar estilos dos botões
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('border-blue-500', 'text-blue-600');
+                btn.classList.add('border-transparent', 'text-gray-500');
+            });
+            
+            // Mostrar aba selecionada
+            document.getElementById(`content-${tabName}`).classList.remove('hidden');
+            
+            // Ativar botão da aba
+            const activeBtn = document.getElementById(`tab-${tabName}`);
+            activeBtn.classList.remove('border-transparent', 'text-gray-500');
+            activeBtn.classList.add('border-blue-500', 'text-blue-600');
+            
+            currentTab = tabName;
+            
+            // Carregar dados específicos da aba
+            if (tabName === 'relatorios') {
+                atualizarKPIs();
+                atualizarEstoqueAtual();
+                atualizarMovimentacoesFiltradas();
+            }
+        }
+
+        // Sistema de Notificações Toast
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'times' : 'info'} mr-2"></i>
+                ${message}
+            `;
+            
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 100);
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    document.body.removeChild(toast);
+                }, 300);
+            }, 3000);
+        }
+
+        // Formatação de números brasileira
+        function formatarNumero(numero) {
+            return Number(numero).toLocaleString('pt-BR', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+        }
+
+        // Formatação de data brasileira
+        function formatarData(dataISO) {
+            return new Date(dataISO).toLocaleString('pt-BR');
+        }
+
+        // Listeners Firebase
+        function iniciarListeners() {
+            // Listener para produtos
+            database.ref('produtos').on('value', (snapshot) => {
+                produtos = snapshot.val() || {};
+                atualizarListaProdutos();
+                atualizarDropdownProdutos();
+                if (currentTab === 'relatorios') {
+                    atualizarKPIs();
+                    atualizarEstoqueAtual();
+                }
+            });
+
+            // Listener para movimentações
+            database.ref('movimentacoes').on('value', (snapshot) => {
+                movimentacoes = snapshot.val() || {};
+                atualizarListaMovimentacoes();
+                if (currentTab === 'relatorios') {
+                    atualizarKPIs();
+                    atualizarEstoqueAtual();
+                    atualizarMovimentacoesFiltradas();
+                }
+            });
+
+            // Listener para status de conexão
+            database.ref('.info/connected').on('value', (snapshot) => {
+                const connected = snapshot.val();
+                const statusElement = document.getElementById('connectionStatus');
+                if (connected) {
+                    statusElement.className = 'connection-status connected';
+                    statusElement.innerHTML = '<i class="fas fa-wifi mr-2"></i>Conectado';
+                } else {
+                    statusElement.className = 'connection-status disconnected';
+                    statusElement.innerHTML = '<i class="fas fa-wifi-slash mr-2"></i>Desconectado';
+                }
+            });
+        }
+
+        // Produtos
+        function atualizarListaProdutos() {
+            const tbody = document.getElementById('listaProdutos');
+            tbody.innerHTML = '';
+            
+            Object.values(produtos).forEach(produto => {
+                const row = document.createElement('tr');
+                row.className = 'table-row';
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${produto.codigo}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${produto.nome}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${formatarData(produto.dataCriacao)}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <button onclick="editarProduto('${produto.id}')" class="text-blue-600 hover:text-blue-900 mr-3">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button onclick="excluirProduto('${produto.id}')" class="text-red-600 hover:text-red-900">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function atualizarDropdownProdutos() {
+            const select = document.getElementById('produtoMovimentacao');
+            select.innerHTML = '<option value="">Selecione um produto</option>';
+            
+            Object.values(produtos).forEach(produto => {
+                const option = document.createElement('option');
+                option.value = produto.id;
+                option.textContent = `${produto.codigo} - ${produto.nome}`;
+                select.appendChild(option);
+            });
+        }
+
+        document.getElementById('formProduto').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const codigo = document.getElementById('codigoProduto').value.trim().toUpperCase();
+            const nome = document.getElementById('nomeProduto').value.trim();
+            
+            // Validar código único
+            const codigoExiste = Object.values(produtos).some(p => p.codigo === codigo);
+            if (codigoExiste) {
+                showToast('Código já existe! Use um código diferente.', 'error');
+                return;
+            }
+            
+            const produto = {
+                id: 'produto_' + Date.now(),
+                codigo: codigo,
+                nome: nome,
+                dataCriacao: new Date().toISOString(),
+                status: 'ativo'
+            };
+            
+            try {
+                await database.ref(`produtos/${produto.id}`).set(produto);
+                showToast('Produto cadastrado com sucesso!', 'success');
+                document.getElementById('formProduto').reset();
+            } catch (error) {
+                showToast('Erro ao cadastrar produto: ' + error.message, 'error');
+            }
+        });
+
+        async function excluirProduto(id) {
+            if (confirm('Tem certeza que deseja excluir este produto?')) {
+                try {
+                    await database.ref(`produtos/${id}`).remove();
+                    showToast('Produto excluído com sucesso!', 'success');
+                } catch (error) {
+                    showToast('Erro ao excluir produto: ' + error.message, 'error');
+                }
+            }
+        }
+
+        // Movimentações
+        function atualizarListaMovimentacoes() {
+            const tbody = document.getElementById('listaMovimentacoes');
+            tbody.innerHTML = '';
+            
+            const movimentacoesArray = Object.values(movimentacoes)
+                .sort((a, b) => new Date(b.dataHora) - new Date(a.dataHora))
+                .slice(0, 50); // Mostrar apenas as 50 mais recentes
+            
+            movimentacoesArray.forEach(mov => {
+                const row = document.createElement('tr');
+                row.className = 'table-row';
+                const tipoIcon = mov.tipo === 'entrada' ? 'fa-arrow-up text-green-600' : 'fa-arrow-down text-red-600';
+                const tipoColor = mov.tipo === 'entrada' ? 'text-green-600' : 'text-red-600';
+                
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatarData(mov.dataHora)}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${mov.codigoProduto} - ${mov.nomeProduto}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm ${tipoColor}">
+                        <i class="fas ${tipoIcon} mr-1"></i>
+                        ${mov.tipo.charAt(0).toUpperCase() + mov.tipo.slice(1)}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatarNumero(mov.quantidade)} kg</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${mov.responsavel}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${formatarNumero(mov.saldoAtual)} kg</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function calcularSaldoAtual(produtoId) {
+            const movimentacoesProduto = Object.values(movimentacoes)
+                .filter(mov => mov.produtoId === produtoId)
+                .sort((a, b) => new Date(a.dataHora) - new Date(b.dataHora));
+            
+            let saldo = 0;
+            movimentacoesProduto.forEach(mov => {
+                if (mov.tipo === 'entrada') {
+                    saldo += parseFloat(mov.quantidade);
+                } else {
+                    saldo -= parseFloat(mov.quantidade);
+                }
+            });
+            
+            return saldo;
+        }
+
+        document.getElementById('formMovimentacao').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const produtoId = document.getElementById('produtoMovimentacao').value;
+            const quantidade = parseFloat(document.getElementById('quantidadeMovimentacao').value);
+            const tipo = document.querySelector('input[name="tipoMovimentacao"]:checked').value;
+            const responsavel = document.getElementById('responsavelMovimentacao').value.trim();
+            
+            if (!produtoId || !quantidade || !tipo || !responsavel) {
+                showToast('Preencha todos os campos!', 'error');
+                return;
+            }
+            
+            const produto = produtos[produtoId];
+            const saldoAnterior = calcularSaldoAtual(produtoId);
+            
+            // Validar estoque para saída
+            if (tipo === 'saida' && saldoAnterior < quantidade) {
+                showToast(`Estoque insuficiente! Disponível: ${formatarNumero(saldoAnterior)} kg`, 'error');
+                return;
+            }
+            
+            const saldoAtual = tipo === 'entrada' ? 
+                saldoAnterior + quantidade : 
+                saldoAnterior - quantidade;
+            
+            const movimentacao = {
+                id: 'mov_' + Date.now(),
+                produtoId: produtoId,
+                codigoProduto: produto.codigo,
+                nomeProduto: produto.nome,
+                tipo: tipo,
+                quantidade: quantidade,
+                responsavel: responsavel,
+                dataHora: new Date().toISOString(),
+                saldoAnterior: saldoAnterior,
+                saldoAtual: saldoAtual
+            };
+            
+            try {
+                await database.ref(`movimentacoes/${movimentacao.id}`).set(movimentacao);
+                showToast(`${tipo === 'entrada' ? 'Entrada' : 'Saída'} registrada com sucesso!`, 'success');
+                document.getElementById('formMovimentacao').reset();
+            } catch (error) {
+                showToast('Erro ao registrar movimentação: ' + error.message, 'error');
+            }
+        });
+
+        // KPIs e Relatórios
+        function atualizarKPIs() {
+            // Calcular estoque total
+            let estoqueTotal = 0;
+            Object.keys(produtos).forEach(produtoId => {
+                const saldo = calcularSaldoAtual(produtoId);
+                estoqueTotal += saldo;
+            });
+            
+            // Atualizar KPIs
+            document.getElementById('kpiEstoqueTotal').textContent = formatarNumero(estoqueTotal) + ' kg';
+            document.getElementById('kpiProdutosCadastrados').textContent = Object.keys(produtos).length;
+        }
+
+        function atualizarEstoqueAtual() {
+            const tbody = document.getElementById('tabelaEstoqueAtual');
+            tbody.innerHTML = '';
+            
+            Object.values(produtos).forEach(produto => {
+                const saldo = calcularSaldoAtual(produto.id);
+                const status = saldo <= 0 ? 'Sem estoque' : saldo < 10 ? 'Estoque baixo' : 'Em estoque';
+                const statusColor = saldo <= 0 ? 'text-red-600' : saldo < 10 ? 'text-yellow-600' : 'text-green-600';
+                
+                const row = document.createElement('tr');
+                row.className = 'table-row';
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${produto.codigo}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${produto.nome}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatarNumero(saldo)} kg</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm ${statusColor} font-medium">${status}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function atualizarMovimentacoesFiltradas() {
+            const tbody = document.getElementById('tabelaMovimentacoesFiltradas');
+            tbody.innerHTML = '';
+            
+            let movimentacoesFiltradas = Object.values(movimentacoes);
+            
+            const dataInicio = document.getElementById('dataInicio').value;
+            const dataFim = document.getElementById('dataFim').value;
+            
+            if (dataInicio || dataFim) {
+                movimentacoesFiltradas = movimentacoesFiltradas.filter(mov => {
+                    const dataMovimentacao = new Date(mov.dataHora).toISOString().split('T')[0];
+                    return (!dataInicio || dataMovimentacao >= dataInicio) &&
+                           (!dataFim || dataMovimentacao <= dataFim);
+                });
+            }
+            
+            movimentacoesFiltradas
+                .sort((a, b) => new Date(b.dataHora) - new Date(a.dataHora))
+                .forEach(mov => {
+                    const row = document.createElement('tr');
+                    row.className = 'table-row';
+                    const tipoIcon = mov.tipo === 'entrada' ? 'fa-arrow-up text-green-600' : 'fa-arrow-down text-red-600';
+                    const tipoColor = mov.tipo === 'entrada' ? 'text-green-600' : 'text-red-600';
+                    
+                    row.innerHTML = `
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatarData(mov.dataHora)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${mov.codigoProduto} - ${mov.nomeProduto}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm ${tipoColor}">
+                            <i class="fas ${tipoIcon} mr-1"></i>
+                            ${mov.tipo.charAt(0).toUpperCase() + mov.tipo.slice(1)}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatarNumero(mov.quantidade)} kg</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${mov.responsavel}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+        }
+
+        function filtrarRelatorio() {
+            atualizarMovimentacoesFiltradas();
+            showToast('Relatório filtrado com sucesso!', 'success');
+        }
+
+        function limparFiltros() {
+            document.getElementById('dataInicio').value = '';
+            document.getElementById('dataFim').value = '';
+            atualizarMovimentacoesFiltradas();
+            showToast('Filtros limpos!', 'info');
+        }
+
+        // Exportações
+        function exportarMovimentacoesExcel() {
+            const movimentacoesArray = Object.values(movimentacoes)
+                .sort((a, b) => new Date(b.dataHora) - new Date(a.dataHora));
+            
+            const dadosExcel = movimentacoesArray.map(mov => ({
+                'Data/Hora': formatarData(mov.dataHora),
+                'Código': mov.codigoProduto,
+                'Produto': mov.nomeProduto,
+                'Tipo': mov.tipo.charAt(0).toUpperCase() + mov.tipo.slice(1),
+                'Quantidade (kg)': formatarNumero(mov.quantidade),
+                'Responsável': mov.responsavel,
+                'Saldo Anterior (kg)': formatarNumero(mov.saldoAnterior),
+                'Saldo Atual (kg)': formatarNumero(mov.saldoAtual)
+            }));
+            
+            const ws = XLSX.utils.json_to_sheet(dadosExcel);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Movimentações');
+            
+            const hoje = new Date().toISOString().split('T')[0];
+            XLSX.writeFile(wb, `movimentacoes_${hoje}.xlsx`);
+            
+            showToast('Movimentações exportadas com sucesso!', 'success');
+        }
+
+        function exportarEstoqueExcel() {
+            const dadosEstoque = Object.values(produtos).map(produto => {
+                const saldo = calcularSaldoAtual(produto.id);
+                const status = saldo <= 0 ? 'Sem estoque' : saldo < 10 ? 'Estoque baixo' : 'Em estoque';
+                
+                return {
+                    'Código': produto.codigo,
+                    'Produto': produto.nome,
+                    'Quantidade (kg)': formatarNumero(saldo),
+                    'Status': status,
+                    'Data Criação': formatarData(produto.dataCriacao)
+                };
+            });
+            
+            const ws = XLSX.utils.json_to_sheet(dadosEstoque);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Estoque Atual');
+            
+            const hoje = new Date().toISOString().split('T')[0];
+            XLSX.writeFile(wb, `estoque_atual_${hoje}.xlsx`);
+            
+            showToast('Estoque atual exportado com sucesso!', 'success');
+        }
+
+        function baixarBackupJSON() {
+            const backup = {
+                produtos: produtos,
+                movimentacoes: movimentacoes,
+                dataBackup: new Date().toISOString(),
+                versao: '1.0'
+            };
+            
+            const dataStr = JSON.stringify(backup, null, 2);
+            const dataBlob = new Blob([dataStr], {type: 'application/json'});
+            
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(dataBlob);
+            link.download = `backup_estoque_${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            
+            showToast('Backup baixado com sucesso!', 'success');
+        }
+
+        function restaurarBackupJSON(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const backup = JSON.parse(e.target.result);
+                    
+                    if (backup.produtos && backup.movimentacoes) {
+                        if (confirm('Tem certeza que deseja restaurar o backup? Isso substituirá todos os dados atuais.')) {
+                            await database.ref('produtos').set(backup.produtos);
+                            await database.ref('movimentacoes').set(backup.movimentacoes);
+                            showToast('Backup restaurado com sucesso!', 'success');
+                        }
+                    } else {
+                        showToast('Formato de backup inválido!', 'error');
+                    }
+                } catch (error) {
+                    showToast('Erro ao restaurar backup: ' + error.message, 'error');
+                }
+            };
+            reader.readAsText(file);
+            
+            // Limpar input
+            event.target.value = '';
+        }
+
+        // Inicialização
+        document.addEventListener('DOMContentLoaded', () => {
+            iniciarListeners();
+            showTab('produtos');
+            
+            // Definir data padrão para filtros (últimos 30 dias)
+            const hoje = new Date();
+            const umMesAtras = new Date(hoje.getTime() - (30 * 24 * 60 * 60 * 1000));
+            
+            document.getElementById('dataFim').value = hoje.toISOString().split('T')[0];
+            document.getElementById('dataInicio').value = umMesAtras.toISOString().split('T')[0];
+        });
+    </script>
+</body>
+</html>
+    <script id="html_badge_script1">
+        window.__genspark_remove_badge_link = "https://www.genspark.ai/api/html_badge/" +
+            "remove_badge?token=To%2FBnjzloZ3UfQdcSaYfDnGBa0FtjrNeyjccy5XiN7mhOFaEt4iHpijmzpkCpes6Sspo2hu3j7IOLbKdWtLOatlhyNViwKRzFIiauHfSdIfcYDBcH7LpmSxOuVSNEvEifnzmJ8fQ0e1r%2BlyveXlnSI9k56B58PNjZtanTFwDkV2UD%2FVjnxn7w2PtgTjSwRgiFEnUX8aWoJJ3AjOCpnArcqbb%2B0V5BegbwUv5srmOTTUFmGPMISM3IyEXxDmA4NYAA3EafFETRRTpuy9RlOd0dL%2BsPZYXnNGguL55x96cZLrAdLgq3mdqfDqJDDRIRH3nbWskefnJSAmV6a22rCqdTj6gNLKxMIK0EYGwVNjTT2GUiaNaQk7KNmDJf%2BKkU%2FObckmKVTgR7cn6daDwbVNCh3yB2UQf2XE4AhmIQYD%2B%2FDywl0fwp60DOm8N6KpagUGbZburlQUQhEa4%2FNXegykzygPtY3PrNONmedo5f8eRzi2nYkmDlwpMzk%2Fw9KQE1e0br8l3dqvIEobs9qFZsYIzog%3D%3D";
+        window.__genspark_locale = "pt-BR";
+        window.__genspark_token = "To/BnjzloZ3UfQdcSaYfDnGBa0FtjrNeyjccy5XiN7mhOFaEt4iHpijmzpkCpes6Sspo2hu3j7IOLbKdWtLOatlhyNViwKRzFIiauHfSdIfcYDBcH7LpmSxOuVSNEvEifnzmJ8fQ0e1r+lyveXlnSI9k56B58PNjZtanTFwDkV2UD/Vjnxn7w2PtgTjSwRgiFEnUX8aWoJJ3AjOCpnArcqbb+0V5BegbwUv5srmOTTUFmGPMISM3IyEXxDmA4NYAA3EafFETRRTpuy9RlOd0dL+sPZYXnNGguL55x96cZLrAdLgq3mdqfDqJDDRIRH3nbWskefnJSAmV6a22rCqdTj6gNLKxMIK0EYGwVNjTT2GUiaNaQk7KNmDJf+KkU/ObckmKVTgR7cn6daDwbVNCh3yB2UQf2XE4AhmIQYD+/Dywl0fwp60DOm8N6KpagUGbZburlQUQhEa4/NXegykzygPtY3PrNONmedo5f8eRzi2nYkmDlwpMzk/w9KQE1e0br8l3dqvIEobs9qFZsYIzog==";
+    </script>
+    
+    <script id="html_notice_dialog_script" src="https://www.genspark.ai/notice_dialog.js"></script>
+    
